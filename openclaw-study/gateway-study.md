@@ -1,9 +1,5 @@
 # OpenClaw Gateway 스터디 — 목표부터 게이트웨이 심층까지
 
-> 학습 서사형 자료. "무엇"보다 **왜 이렇게 짰고, 어떻게 가능하며, 무엇이 다른가**에 무게를 둔다.
-> 코드 링크는 **`openclaw@0fc5a57a`** 에 고정. 코드 레벨 레퍼런스는 [openclaw-gateway.md](./openclaw-gateway.md), 흐름도는 [diagrams/04-gateway-rpc](./diagrams/04-gateway-rpc.png), 전체 구조는 [openclaw-architecture.md](./openclaw-architecture.md).
-> deep-research 외부 교차검증 결과는 §3.5와 openclaw-gateway.md 부록 B에 반영.
-
 ---
 
 # 1. OpenClaw의 목표 — 무슨 문제를 푸는가
@@ -18,15 +14,15 @@
 
 이 세 목표가 곧 게이트웨이의 존재 이유다. "local-first + multi-channel + always-on"을 동시에 만족하려면 **내 기기에 상주하면서 모든 채널과 에이전트를 묶는 중심 프로세스**가 필요한데, 그게 바로 게이트웨이다.
 
-두 가지 관통 설계 원칙(코드 읽기 전에 머리에 박을 것):
+두 가지 관통 설계 원칙:
 - **코어는 플러그인을 모른다(plugin-agnostic)** — 채널/기능은 `src/plugin-sdk/*` 계약으로만 코어에 진입.
 - **상태는 전부 SQLite** — 전역 `state/openclaw.sqlite`, 에이전트별 `agents/<id>/agent/openclaw-agent.sqlite`. JSON 사이드카 안 씀.
+
+*상태: 게이트웨이/에이전트가 요청 사이, 그리고 재시작 후에도 기억해야 하는 데이터 (휘발성 데이터 X)
 
 ---
 
 # 2. 전체 구조 — 메시지가 흐르는 길
-
-OpenClaw는 pnpm 워크스페이스 모노레포(TypeScript, MIT). 4개 영역:
 
 | 영역 | 경로 | 역할 |
 |------|------|------|
@@ -51,11 +47,11 @@ OpenClaw는 pnpm 워크스페이스 모노레포(TypeScript, MIT). 4개 영역:
 ⑤ 게이트웨이 ── durable delivery 정책으로 채널 어댑터에 전달 → 같은 채널로 역방향 응답
 ```
 
-핵심은 **단 하나의 장수 게이트웨이가 control plane이자 single source of truth(SSOT)** 라는 것. 채널·세션·라우팅·툴·이벤트를 전부 게이트웨이가 소유하고, 클라이언트(앱·CLI·웹UI·모바일 노드·에이전트)는 **WebSocket으로 게이트웨이에 붙는다.** 다음 장이 이 게이트웨이의 속을 연다.
+핵심은 **단 하나의 장수 게이트웨이가 control plane이자 single source of truth(SSOT)** 라는 것. 채널·세션·라우팅·툴·이벤트를 전부 게이트웨이가 소유하고, 클라이언트(앱·CLI·웹UI·모바일 노드·에이전트)는 **WebSocket으로 게이트웨이에 붙는다.**
 
 ---
 
-# 3. 게이트웨이 — 일반 설명 + 왜 / 어떻게 / 차별점
+# 3. 게이트웨이
 
 ## 3.0 게이트웨이란 무엇인가 (역할)
 
@@ -64,8 +60,6 @@ OpenClaw는 pnpm 워크스페이스 모노레포(TypeScript, MIT). 4개 영역:
 > *"builds runtime state, method registries, HTTP and WebSocket surfaces, config reload hooks, and graceful restart/shutdown."*
 
 즉 게이트웨이는 **① 모든 클라이언트가 붙는 WS 서버**, **② 메서드 RPC 레지스트리(채널·세션·승인·노드…)**, **③ 이벤트 broadcast 허브**, **④ 인증·인가 경계**, **⑤ 채널 플러그인 매니저**를 한 몸에 가진다. 기본 바인드는 `127.0.0.1:18789`.
-
-여기서부터가 이 자료의 핵심 — 일반 설명을 넘어 **왜 / 어떻게 / 차별점**.
 
 ---
 
@@ -115,13 +109,11 @@ WebSocket은 이 넷을 한 연결 위에서 자연스럽게 멀티플렉싱한�
 
 ### (c) 왜 메서드마다 인가 + default-deny인가
 
-에이전트 행동은 모델이 결정한다(인젝션 위험). 그래서 **모든 행동을 인증된 WS RPC 한 곳으로 강제**하고, 메서드별 최소권한 스코프를 검사한다. 모호하면 막는다(fail-closed). 자세한 메커니즘은 §3.3의 "어떻게".
+에이전트 행동은 모델이 결정한다(인젝션 위험). 그래서 **모든 행동을 인증된 WS RPC 한 곳으로 강제**하고, 메서드별 최소권한 스코프를 검사한다. 모호하면 막는다(fail-closed).
 
 ---
 
 ## 3.3 어떻게 이게 가능한가 — 메커니즘
-
-"왜"를 떠받치는 구체적 장치들. 이게 핵심 학습 포인트다.
 
 ### (a) 3프레임 프로토콜 + 핸드셰이크
 
@@ -195,18 +187,6 @@ res 도착 → pending(그 id) 찾음
 ### vs Hermes Agent (같은 local-first 동류)
 - 둘 다 local-first 개인 에이전트지만, **Hermes의 핵심 차별점은 "성장(growth)"** (경험에서 스킬 생성·자기개선). OpenClaw는 **멀티채널 게이트웨이 + plugin-agnostic 코어 + SQLite 단일정본**이라는 *플랫폼/런타임 엄밀성*에 무게가 실린다. (짝 비교: [Hermes 분석 §9](../hermes-agent-study/hermes-agent-architecture.md))
 
-### 그리고 — "새 발명이 아니라 정설의 조합"
-deep-research로 외부 분산시스템·보안 통념과 대조한 결과, 게이트웨이의 선택은 **확립된 패턴의 정밀한 조합**으로 확인됐다(대부분 3-0 confirm):
-
-| 게이트웨이 설계 | 대응하는 외부 정설 |
-|---|---|
-| WS 한 연결로 RPC+push, req/res/event 3종 | JSON-RPC 2.0 / LSP의 request·response·**notification** |
-| `id`로 요청-응답 상관, res는 ok/error 하나 | JSON-RPC 정의 |
-| accepted→final 2단계 | Google AIP-151 long-running Operation (=HTTP 202+polling) |
-| handshake에 scope 바인딩 + per-method 검사 + default-deny | MCP / OAuth 2.1 (`insufficient_scope`) |
-| embedded 에이전트도 인가 경계 경유 | 프롬프트 인젝션은 모델 탐지 불가 → **구조적 least-privilege·격리** (arXiv:2506.08837, 2503.15547) |
-| WS `tick` 하트비트 | RFC 6455 Ping/Pong |
-
 → **차별점의 본질**: 개별 기법은 표준이지만, 이걸 *"내 기기에 상주하는 멀티채널 개인 에이전트의 control plane"* 이라는 한 점으로 묶어낸 **조합과 경계 설계**가 OpenClaw 게이트웨이의 정체성이다.
 
 ---
@@ -220,4 +200,8 @@ deep-research로 외부 분산시스템·보안 통념과 대조한 결과, 게�
 - **어떻게**: 3프레임 + 핸드셰이크 권한 바인딩 + 매호출 `authorizeGatewayMethod` + default-deny + lazy/presence/restart.
 - **차별점**: 클라우드 어시스턴트·라이브러리·단일봇·MCP 단독과 다른 "내 기기 멀티채널 control plane"; 개별 기법은 JSON-RPC/AIP-151/MCP·OAuth/인젝션 보안 정설의 조합.
 
-더 깊은 코드 레벨(메서드 패밀리·이벤트·세션·노드·생명주기)은 [openclaw-gateway.md](./openclaw-gateway.md), 흐름은 [04-gateway-rpc 다이어그램](./diagrams/04-gateway-rpc.png) 참고.
+> **local-first를 장점으로 보는 것에 대한 개인적인 생각 <br>**
+> 로컬에 상주한다는 게 장점인지는? 잘 모르겠다. 일반 오픈소스 에이전트도 Ollama같은 툴을 이용해 로컬에서
+> 구동이 가능하다. 하지만, 결국 이건 하드웨어가 어느정도 받춰주어야 하는 점인데, 하드웨어 성능이 안좋은 유저는
+> 대부분 api로 사용을 하는 것으로 알고 있는데, 이 방법은 비용이 꽤 많이 든다. 그리고 이게 로컬이라고 하면 그건
+> 또 아닌 것 같다.

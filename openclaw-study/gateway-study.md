@@ -18,7 +18,7 @@
 - **코어는 플러그인을 모른다(plugin-agnostic)** — 채널/기능은 `src/plugin-sdk/*` 계약으로만 코어에 진입.
 - **상태는 전부 SQLite** — 전역 `state/openclaw.sqlite`, 에이전트별 `agents/<id>/agent/openclaw-agent.sqlite`.
 
-*상태: 게이트웨이/에이전트가 요청 사이, 그리고 재시작 후에도 기억해야 하는 데이터 (휘발성 데이터 X)
+*상태: 영속화된 컨텍스트
 
 ---
 
@@ -59,7 +59,7 @@
 
 > *"builds runtime state, method registries, HTTP and WebSocket surfaces, config reload hooks, and graceful restart/shutdown."*
 
-게이트웨이는 **① 앱·CLI·웹UI·노드·에이전트가 붙는 WS 서버**, **② 메서드 RPC 레지스트리(채널·세션·승인·노드…)**, **③ 이벤트 broadcast 허브**, **④ 인증·인가 경계**, **⑤ 채널 플러그인 매니저**, **⑥ 멀티 에이전트 라우터**를 한 몸에 가진다. 기본 바인드는 `127.0.0.1:18789`.
+게이트웨이는 **① 앱·CLI·웹UI·노드·에이전트가 붙는 WS 서버**, **② 메서드 RPC 레지스트리(채널·세션·승인·노드…)**, **③ 이벤트 broadcast 허브**, **④ 인증·인가 경계**, **⑤ 채널 플러그인 매니저**, **⑥ 멀티 에이전트 라우터**를 한 몸에 가진다.
 
 > **게이트웨이에 WS로 붙는 주체는 셋**:
 >
@@ -71,7 +71,7 @@
 
 이 중 **②③④가 게이트웨이를 단순 메시지 중계가 아니라 "권한이 강제되는 control plane"으로 만드는 핵심 장치**다.
 
-### ② 메서드 RPC 레지스트리 — "할 줄 아는 일들의 목록"
+### ② 메서드 RPC 레지스트리
 
 앱·CLI·웹UI·에이전트가 `req {method, params}`로 호출할 수 있는 **모든 메서드를 이름→핸들러로 묶어둔 표**. 게이트웨이의 API 표면 전체다([`server-methods.ts`](https://github.com/openclaw/openclaw/blob/0fc5a57a34409782c8e0c9260cedbf788ed382d8/src/gateway/server-methods.ts)).
 
@@ -98,14 +98,40 @@ req → authorizeGatewayMethod(④) → 쓰기 레이트리밋
 
 핵심:
 - 대표 패밀리: `chat.*` · `sessions.*` · `channels.*` · `cron.*` · `node.*` · `device.*` · `exec.approvals.*` · `models.*` · `config.*` · `tools.*` · `talk.*`
-- **플러그인도 메서드를 등록**한다(코어 핸들러 + `activeRegistry.gatewayMethodDescriptors`). 단 `normalizePluginGatewayMethodScope()`로 admin 사칭 차단.
-- 즉 "게이트웨이가 SSOT로서 소유한 모든 동작"이 이 한 표를 진입점으로 거친다.
+- **플러그인도 메서드를 등록**한다(코어 핸들러 + `activeRegistry.gatewayMethodDescriptors`). 단 `normalizePluginGatewayMethodScope()`로 권한 다운그레이드 차단(아래).
 
-### ③ 이벤트 broadcast 허브 — "서버가 먼저 미는 확성기"
+> **스코프(scope)란?** "이 연결이 *무엇까지 할 수 있나*"를 나타내는 **권한 라벨**이다. 메서드·이벤트마다 **필요 스코프(required)** 가 있고, 연결은 인증 때 **부여된 스코프(granted)** 를 받는다. 호출 허용 조건은 **granted ⊇ required** (연결이 가진 권한이 메서드가 요구하는 권한을 포함).
+> OpenClaw operator 스코프([`operator-scopes.ts`](https://github.com/openclaw/openclaw/blob/0fc5a57a34409782c8e0c9260cedbf788ed382d8/src/gateway/operator-scopes.ts)):
+>
+> | 스코프 | 할 수 있는 것 |
+> |---|---|
+> | `operator.read` | 조회 (세션·상태 보기) |
+> | `operator.write` | 변경 (메시지 전송 등) |
+> | `operator.approvals` | 승인 처리 |
+> | `operator.pairing` | 기기/노드 페어링 |
+> | `operator.admin` | 전부 (설정·민감 작업). admin이면 모든 스코프 검사 통과 |
+>
+> **role과 다름**: `role`(operator/node)은 큰 분류, `scope`는 그 안의 세부 권한. 예) operator 역할이라도 `read`만 있으면 메시지 전송(`write` 필요)은 거부. (앞 §②·§③에서 본 `operator.read`/`READ`/`APPROVALS` 가 다 이 스코프다.)
 
-`res`(요청 응답)와 **별개로**, 상태 변화를 **구독한 앱·UI·노드(세션을 들여다보는 쪽)**에게 `event` 프레임으로 밀어내는 장치([`server-broadcast.ts`](https://github.com/openclaw/openclaw/blob/0fc5a57a34409782c8e0c9260cedbf788ed382d8/src/gateway/server-broadcast.ts)).
+> **예시 — 플러그인이 민감 메서드를 약하게 못 연다**
+> 각 메서드는 "필요 스코프"(= 호출에 필요한 권한 라벨, 정의는 §3.0 ④)를 선언한다. 그런데 `config.*`·`exec.approvals.*`·`wizard.*`·`update.*` 는 **예약된 admin 네임스페이스**. 플러그인이 이 이름으로 메서드를 등록하면, **선언한 스코프를 무시하고 메서드 *이름*만 보고 필요 스코프를 `operator.admin`으로 강제**한다([`gateway-method-policy.ts`](https://github.com/openclaw/openclaw/blob/0fc5a57a34409782c8e0c9260cedbf788ed382d8/src/shared/gateway-method-policy.ts)).
+>
+> ```
+> 플러그인 시도:  config.setSecret   scope:"operator.read"   ← 약하게(아무나) 열려는 시도
+>      │ 이름이 "config."로 시작 → 예약 admin 네임스페이스
+>      ▼ normalizePluginGatewayMethodScope: 선언(read) 버리고 강제 교체
+> 실제 등록:      config.setSecret   scope:"operator.admin"  ← admin만 호출 가능
+>      ▼ 나중에 비-admin이 호출하면
+> authorizeGatewayMethod → "missing scope" 거부
+> ```
+>
+> 즉 "약한지 비교"하는 게 아니라 **이름으로 스코프를 정하고 플러그인 선언을 덮어쓴다.** 플러그인이 `config.*` 밖 이름(`myplugin.foo`)을 쓰면 그건 admin 네임스페이스가 아니라 사칭도 불가. → 플러그인(준-신뢰 코드)이 민감 표면을 저권한으로 여는 escalation 구멍을 못 만든다.
 
-두 함수: `broadcast(event, payload)`(연결된 모두에게) / `broadcastToConnIds(...)`(특정 연결에게만). 연결마다 돌며 셋을 적용:
+### ③ 이벤트 broadcast 허브
+
+`res`(요청 응답)와 **별개로**, 상태 변화를 구독한 앱·UI·노드(세션을 들여다보는 쪽)에게 `event` 프레임으로 밀어내는 장치([`server-broadcast.ts`](https://github.com/openclaw/openclaw/blob/0fc5a57a34409782c8e0c9260cedbf788ed382d8/src/gateway/server-broadcast.ts)).
+
+두 함수가 `broadcast(event, payload)`(연결된 모두에게) / `broadcastToConnIds(...다)`(특정 연결에게만). 연결마다 돌며 셋을 적용:
 
 - **(a) 이벤트별 scope 가드** — `EVENT_SCOPE_GUARDS`가 이벤트마다 필요 스코프 선언 → **권한 없는 연결엔 안 보냄**.
   ```
@@ -117,13 +143,11 @@ req → authorizeGatewayMethod(④) → 쓰기 레이트리밋
 - **(b) per-client 단조 seq** — 연결마다 순번을 매겨 보냄 → 받는 쪽이 `seq`로 **누락(gap) 감지** 후 재동기. 단 targeted 이벤트는 seq 미부여.
 - **(c) 느린 소비자 보호** — 어떤 연결의 `socket.bufferedAmount > MAX_BUFFERED_BYTES`면 이벤트를 버리거나(`dropIfSlow`) 연결을 끊는다. 한 느린 연결이 게이트웨이 메모리를 무한정 먹는 걸 차단.
 
-→ 새 메시지·세션 변화·승인 요청·presence가 **받는 앱·UI가** 묻기 전에 흐르고, **이벤트조차 scope로 필터**되어 권한 없는 연결은 "그 일이 일어난 줄도 모른다."
-
 ### ④ 인증·인가 경계 — "모든 출입을 검문하는 관문"
 
 모든 연결의 신원을 확인(인증)하고 모든 메서드 호출의 권한을 검사(인가)하는 단일 관문.
 
-- **인증** — `connect` 핸드셰이크에서 자격증명+device 서명 검증 → **granted role+scopes를 연결에 고정**(`client.connect.scopes`). 이 값은 §"상태"의 `device_auth_tokens`·`device_pairing_paired`에서 조회된다. → 권한이 **연결당 1회** 확정되고, 이후 요청은 이 값을 못 부풀린다.
+- **인증** — `connect` 핸드셰이크에서 자격증명+device 서명 검증 → **granted role+scopes를 연결에 고정**. 이 값은 "상태"의 `device_auth_tokens`·`device_pairing_paired`에서 조회된다. → 권한이 **연결당 1회** 확정되고, 이후 요청은 이 값을 못 부풀린다.
 - **인가** — 매 req마다 디스패치 직전 `authorizeGatewayMethod`가 검사([`server-methods.ts:221`](https://github.com/openclaw/openclaw/blob/0fc5a57a34409782c8e0c9260cedbf788ed382d8/src/gateway/server-methods.ts#L221)):
   ```
   role = parseGatewayRole(connect.role ?? "operator")  → 실패 "unauthorized role"
@@ -132,7 +156,7 @@ req → authorizeGatewayMethod(④) → 쓰기 레이트리밋
   if (scopes.includes(ADMIN_SCOPE)) return ok
   if (!authorizeOperatorScopesForMethod(...).allowed)  → "missing scope: X"
   ```
-  → **granted(연결 허용) ⊇ required(메서드 필요)** 검사. **default-deny**: 모르는 메서드는 admin을 요구해 자동 거부([`method-scopes.ts:160`](https://github.com/openclaw/openclaw/blob/0fc5a57a34409782c8e0c9260cedbf788ed382d8/src/gateway/method-scopes.ts#L160), [`:192`](https://github.com/openclaw/openclaw/blob/0fc5a57a34409782c8e0c9260cedbf788ed382d8/src/gateway/method-scopes.ts#L192)).
+  → **granted(연결 허용) ⊇ required(메서드 필요)** 검사. **default-deny**: 모르는 메서드는 admin을 요구해 자동 거부
 
 **세 역할의 관계 — ④가 ②③를 감싼다:**
 ```
@@ -143,7 +167,6 @@ req ───▶│ connect 때 신원·권한 고정                 │
         │   └─▶ ③ broadcast(event) ─ scope 필터 ─▶ 구독자(앱·UI·노드)
         └──────────────────────────────────────────┘
 ```
-이 셋이 합쳐져 **모든 동작(②)과 모든 이벤트(③)가 권한(④)을 통과**하게 만든다.
 
 ### ⑥ 멀티 에이전트 라우터 — "인바운드를 어느 에이전트로?"
 
@@ -151,12 +174,8 @@ req ───▶│ connect 때 신원·권한 고정                 │
 
 - **인바운드가 들고 오는 것**: 채널 · 계정 · 상대방(peer: DM/그룹/길드, peerId, peerKind).
 - **바인딩 우선순위 매칭** (운영자가 config에 설정, **구체적인 것부터**):
-  ```
-  binding.peer → guild+roles / team → binding.account → binding.channel → (없으면) 기본 "main"
-  ```
-  예: "텔레그램 이 그룹 → `work` 에이전트" / "이 채널 전체 → `main`". 더 구체적인 규칙이 이기므로 같은 채널이라도 특정 그룹만 다른 에이전트로 보낼 수 있다.
-- **결과 = 세션키** `agent:<agentId>:<channel>:<peerKind>:<peerId>` — 어느 에이전트의 *어느 대화*인지 유일 식별. 세션 스토어가 이 키로 맥락·메모리를 저장하므로 **같은 대화는 늘 같은 에이전트·세션**으로 이어진다.
-- **연속성**: 첫 라우팅 후 `current_conversation_bindings`(§상태)에 현재 라우트를 기록해 매번 다시 안 따진다.
+- 세션키: `agent:<agentId>:<channel>:<peerKind>:<peerId>` — 어느 에이전트의 *어느 대화*인지 유일 식별.
+- **연속성**: 첫 라우팅 후 `current_conversation_bindings`(상태)에 현재 라우트를 기록해 매번 다시 안 따진다.
 
 ```
 Telegram 그룹X → 채널 플러그인 → 게이트웨이
@@ -168,18 +187,16 @@ Telegram 그룹X → 채널 플러그인 → 게이트웨이
 
 ## 3.1 왜 WebSocket?
 
-한 줄: **게이트웨이는 "요청-응답 서버"가 아니라 "양방향으로 이벤트를 계속 밀어내는 장수 control plane"이라서.**
-
 HTTP 요청-응답 1:1 모델로는 표현 못 하는 게 게이트웨이엔 본질적으로 존재한다:
 
-1. **한 요청이 한 번에 안 끝난다 (2단계 응답).** 에이전트 run·승인 대기처럼 오래 걸리는 작업은 "접수됨(accepted)"을 먼저 돌려주고 결과(final)는 나중에 온다. → 하나의 `req`에 `res`가 두 번.
+1. **한 요청이 한 번에 안 끝난다.** 에이전트 run·승인 대기처럼 오래 걸리는 작업은 "접수됨(accepted)"을 먼저 돌려주고 결과(final)는 나중에 온다. → 하나의 `req`에 `res`가 두 번.
 2. **서버가 받는 쪽에 먼저 민다 (push).** 새 inbound 메시지, 세션 변화, 노드 상태, 토큰 스트리밍을 **앱·UI 등 받는 쪽이** 묻기도 전에 게이트웨이가 밀어낸다([`server-broadcast.ts`](https://github.com/openclaw/openclaw/blob/0fc5a57a34409782c8e0c9260cedbf788ed382d8/src/gateway/server-broadcast.ts), [`server-session-events.ts`](https://github.com/openclaw/openclaw/blob/0fc5a57a34409782c8e0c9260cedbf788ed382d8/src/gateway/server-session-events.ts)).
 3. **구독(subscription)** — **앱·UI·노드가** 세션/노드를 구독하고 지속적으로 업데이트를 받는다.
-4. **프레즌스** — 지속 소켓에서는 **끊김이 곧 이탈 신호**. 하트비트(`tick`)로 생존을 안다.
+4. **프레즌스** — 하트비트(`tick`)로 생존 알림.
 
-WebSocket은 이 넷을 한 연결 위에서 자연스럽게 멀티플렉싱한다. 그래서 WS다.
+WebSocket은 이 넷을 한 연결 위에서 자연스럽게 보장한다.
 
-> **단, WS-only가 아니다.** stateless 단발(웹UI 정적자원, 임베딩, health 프로브)은 HTTP를 병행한다([`server-http.ts`](https://github.com/openclaw/openclaw/blob/0fc5a57a34409782c8e0c9260cedbf788ed382d8/src/gateway/server-http.ts)). "지속·양방향은 WS, 단발은 HTTP"라는 의도적 분리다.
+> **단, WS-only가 아니다.** stateless 단발(웹UI 정적자원, 임베딩, health 프로브)은 HTTP를 병행한다.
 
 ---
 
@@ -189,11 +206,9 @@ WebSocket은 이 넷을 한 연결 위에서 자연스럽게 멀티플렉싱한�
 
 게이트웨이는 **single source of truth**다. 채널·세션·라우팅·승인·노드 상태를 한 프로세스가 쥔다. 왜?
 
-- **권한 검사를 한 곳에서 강제**할 수 있다 (§3.3).
-- 상태가 한 정본에 모여 **일관성**이 보장된다 (분산 상태의 동기화 지옥 회피).
+- **권한 검사를 한 곳에서 강제**할 수 있다.
+- 상태가 한 정본에 모여 **일관성**이 보장된다 (분산 상태의 동기화 지옥 회피) -> SQLite.
 - 에이전트가 로컬이든 원격이든 **동일하게 control plane만 호출**하면 된다.
-
-그래서 모두가 게이트웨이 하나에 붙고 서로 직접 안 붙는 **별(star) 토폴로지**가 된다.
 
 ### (b) 왜 채널은 안에, 에이전트는 WS 밖인가 (신뢰 경계)
 
@@ -212,7 +227,7 @@ WebSocket은 이 넷을 한 연결 위에서 자연스럽게 멀티플렉싱한�
 
 ### (c) 왜 메서드마다 인가 + default-deny인가
 
-에이전트 행동은 모델이 결정한다(인젝션 위험). 그래서 **모든 행동을 인증된 WS RPC 한 곳으로 강제**하고, 메서드별 최소권한 스코프를 검사한다. 모호하면 막는다(fail-closed).
+에이전트 행동은 모델이 결정한다. 그래서 **모든 행동을 인증된 WS RPC 한 곳으로 강제**하고, 메서드별 최소권한 스코프를 검사한다. 모호하면 막는다(fail-closed).
 
 ---
 
@@ -220,7 +235,7 @@ WebSocket은 이 넷을 한 연결 위에서 자연스럽게 멀티플렉싱한�
 
 ### (a) 3프레임 프로토콜 + 핸드셰이크
 
-와이어는 단 3종 프레임으로 멀티플렉싱된다([`schema/frames.ts`](https://github.com/openclaw/openclaw/blob/0fc5a57a34409782c8e0c9260cedbf788ed382d8/packages/gateway-protocol/src/schema/frames.ts)):
+와이어는 단 3종 프레임으로 구성된다.([`schema/frames.ts`](https://github.com/openclaw/openclaw/blob/0fc5a57a34409782c8e0c9260cedbf788ed382d8/packages/gateway-protocol/src/schema/frames.ts)):
 
 | 프레임 | 방향 | 의미 |
 |---|---|---|
@@ -228,7 +243,6 @@ WebSocket은 이 넷을 한 연결 위에서 자연스럽게 멀티플렉싱한�
 | `res {id, ok, payload, error}` | 게이트웨이 → 요청 보낸 쪽 | **요청 id에 짝지어진 응답** |
 | `event {event, payload, seq, stateVersion}` | 게이트웨이 → 구독자 | **id 없는 일방 push** |
 
-연결은 `connect`(자격증명·device 서명·요청 스코프) → `hello-ok`(협상된 protocol·features·snapshot·**granted role+scopes**·policy)로 시작한다. **핵심: 권한이 이 핸드셰이크에서 연결에 박힌다.**
 
 ### (b) 2단계 응답(accepted→final)은 어떻게 도나
 
@@ -242,37 +256,12 @@ res 도착 → pending(그 id) 찾음
   pending.delete(id); ok? resolve : reject   // 두 번째 res = 최종 결과
 ```
 
-동시에 `event`가 `seq`(누락 감지)·`tick`(하트비트)·`stateVersion`(상태 동기)으로 **독립 스트림**을 이룬다. → 한 소켓 위 **이중 멀티플렉싱**: id 2단계 응답 + seq 일방 이벤트.
 
 ### (c) always-on을 어떻게 떠받치나
 
 - **lazy 부팅** — [`server.ts`](https://github.com/openclaw/openclaw/blob/0fc5a57a34409782c8e0c9260cedbf788ed382d8/src/gateway/server.ts)가 구현체를 동적 import 뒤에 두고, 핸들러 패밀리도 첫 호출 때 로드 → startup 비용 절감.
 - **presence/health** — 채널 health monitor(기본 5분 주기)와 tick 하트비트로 생존 추적.
 - **graceful restart/shutdown** — [`server-close.ts`](https://github.com/openclaw/openclaw/blob/0fc5a57a34409782c8e0c9260cedbf788ed382d8/src/gateway/server-close.ts)가 채널·세션·cron을 순서대로 drain하고, [`server-restart-sentinel.ts`](https://github.com/openclaw/openclaw/blob/0fc5a57a34409782c8e0c9260cedbf788ed382d8/src/gateway/server-restart-sentinel.ts)가 재시작 후 pending 작업을 재개. 항상 켜진 데몬이 안전하게 갱신된다.
-
----
-
-## 3.4 다른 것들과의 차별점
-
-### vs 클라우드 어시스턴트 (ChatGPT·Claude.ai 등)
-- 저쪽: **control plane이 벤더 서버**에 있고, 데이터·세션·도구 실행이 클라우드에 귀속. 사용자는 클라이언트일 뿐.
-- OpenClaw: **control plane이 내 기기**. 게이트웨이가 내 노트북/VPS에서 SSOT로 돌고, 자격증명·세션·메모리가 로컬 SQLite에 남는다. → *소유권·프라이버시·오프라인성*이 근본적으로 다르다.
-
-### vs 에이전트 프레임워크/라이브러리 (LangChain·AutoGPT류)
-- 저쪽: 대개 **호출형 라이브러리**. 스크립트가 돌 때만 살아있고, 멀티채널 수신·세션 상주·프레즌스 개념이 없다.
-- OpenClaw: **상주 데몬 + 멀티채널 게이트웨이**. 여러 메신저에서 들어오는 걸 fan-in해 하나의 에이전트로 라우팅하고, 세션·승인·노드를 지속 관리. → *라이브러리 vs 상시 가동 허브*.
-
-### vs 단일 채널 봇 (텔레그램 봇 하나 등)
-- 저쪽: 채널 1개에 묶인 핸들러. 채널이 늘면 코드가 갈라진다.
-- OpenClaw: 채널은 **전송 전용 플러그인**(in-process)으로 표준화되고, 제품 로직은 게이트웨이/에이전트가 소유. 채널 추가 = 플러그인 추가. → *N채널을 한 두뇌로*.
-
-### vs MCP 단독 / 순수 RPC 툴 연결
-- MCP는 "툴/리소스 연결 프로토콜"이다. OpenClaw 게이트웨이는 그 역할(툴·승인·인가)을 **포함하면서** 채널 수신·세션·프레즌스·라우팅까지 묶은 **상위 control plane**이다. 실제로 게이트웨이의 인가 모델은 **MCP/OAuth 2.1의 capability-scope 모델과 정렬**된다(아래).
-
-### vs Hermes Agent (같은 local-first 동류)
-- 둘 다 local-first 개인 에이전트지만, **Hermes의 핵심 차별점은 "성장(growth)"** (경험에서 스킬 생성·자기개선). OpenClaw는 **멀티채널 게이트웨이 + plugin-agnostic 코어 + SQLite 단일정본**이라는 *플랫폼/런타임 엄밀성*에 무게가 실린다. (짝 비교: [Hermes 분석 §9](../hermes-agent-study/hermes-agent-architecture.md))
-
-→ **차별점의 본질**: 개별 기법은 표준이지만, 이걸 *"내 기기에 상주하는 멀티채널 개인 에이전트의 control plane"* 이라는 한 점으로 묶어낸 **조합과 경계 설계**가 OpenClaw 게이트웨이의 정체성이다.
 
 ---
 
@@ -285,28 +274,19 @@ res 도착 → pending(그 id) 찾음
 - **어떻게**: 3프레임 + 핸드셰이크 권한 바인딩 + 매호출 `authorizeGatewayMethod` + default-deny + lazy/presence/restart.
 - **차별점**: 클라우드 어시스턴트·라이브러리·단일봇·MCP 단독과 다른 "내 기기 멀티채널 control plane"; 개별 기법은 JSON-RPC/AIP-151/MCP·OAuth/인젝션 보안 정설의 조합.
 
-> **local-first를 장점으로 보는 것에 대한 개인적인 생각 <br>**
-> 로컬에 상주한다는 게 장점인지는? 잘 모르겠다. 일반 오픈소스 에이전트도 Ollama같은 툴을 이용해 로컬에서
-> 구동이 가능하다. 하지만, 결국 이건 하드웨어가 어느정도 받춰주어야 하는 점인데, 하드웨어 성능이 안좋은 유저는
-> 대부분 api로 사용을 하는 것으로 알고 있는데, 이 방법은 비용이 꽤 많이 든다. 그리고 이게 로컬이라고 하면 그건
-> 또 아닌 것 같다.
 
 ---
 
 ## 전체 흐름 다이어그램 — 채널 입력부터 태스크 완료까지
 
-예시 시나리오: **유저가 텔레그램으로 "내일 일정 정리해줘" → 에이전트가 캘린더 읽고 정리 → 답장.** 지금까지 본 모든 조각(채널 in-process·라우팅·인증/인가·에이전트↔모델 루프·툴 인가·2단계 응답·broadcast·durable 전송)이 한 왕복에 어떻게 맞물리는지 보여준다.
-
 ![전체 흐름 — 채널 입력부터 태스크 완료까지](./diagrams/05-end-to-end.png)
 
 1. 유저가 채널(Telegram)로 입력
 2. 채널 플러그인이 정규화해 게이트웨이로 (in-process)
-3. 게이트웨이 **라우팅**: 바인딩→agentId·세션키, 인증된 세션 오픈 (§3.0 ⑥)
+3. 게이트웨이 **라우팅**: 바인딩→agentId·세션키, 인증된 세션 오픈
 4. 게이트웨이가 해당 **에이전트** run 시작
 5~6. 에이전트 ↔ **모델(LLM)**: "뭐 할까?" → "캘린더 툴 써"
-7. 에이전트 툴 → 게이트웨이 **WS 호출** → `authorizeGatewayMethod` **인가** (§3.0 ④) — 위험 동작이면 **accepted→유저 승인→final** 2단계 (§3.3 b)
+7. 에이전트 툴 → 게이트웨이 **WS 호출** → `authorizeGatewayMethod` **인가** — 위험 동작이면 **accepted→유저 승인→final** 2단계
 8~9. 캘린더 데이터 받아 모델에 먹임 → 정리 완료
-10. 진행상황은 **broadcast**로 앱·UI에 실시간 (scope 필터, §3.0 ③)
+10. 진행상황은 **broadcast**로 앱·UI에 실시간 (scope 필터)
 11~13. 최종 답을 게이트웨이가 받아 **channel.send()**(in-process·durable) → 같은 채널로 답장
-
-> 핵심: 유저↔채널은 플랫폼 프로토콜, 채널↔게이트웨이는 in-process, **에이전트↔게이트웨이만 WS**. 그리고 에이전트의 모든 행동(⑦)은 인가 관문을 통과한다.

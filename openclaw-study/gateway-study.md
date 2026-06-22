@@ -24,13 +24,6 @@
 
 # 2. 전체 구조 — 메시지가 흐르는 길
 
-| 영역 | 경로 | 역할 |
-|------|------|------|
-| 코어 런타임 | [`src/`](https://github.com/openclaw/openclaw/tree/0fc5a57a34409782c8e0c9260cedbf788ed382d8/src) | 게이트웨이·에이전트 런타임·채널 인프라·CLI·config |
-| 공유 패키지 | [`packages/*`](https://github.com/openclaw/openclaw/tree/0fc5a57a34409782c8e0c9260cedbf788ed382d8/packages) | `gateway-protocol`, `gateway-client`, `plugin-sdk` 등 |
-| 플러그인 | [`extensions/*`](https://github.com/openclaw/openclaw/tree/0fc5a57a34409782c8e0c9260cedbf788ed382d8/extensions) | 채널·기능 통합. 내부명 "extensions", 제품명 "plugins" |
-| 네이티브 앱 / UI | `apps/*`, `ui/` | android·ios·macos 클라이언트, 웹 제어 대시보드 |
-
 **메시지가 흐르는 큰 길** (양방향):
 
 ```

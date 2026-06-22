@@ -16,7 +16,7 @@
 
 두 가지 관통 설계 원칙:
 - **코어는 플러그인을 모른다(plugin-agnostic)** — 채널/기능은 `src/plugin-sdk/*` 계약으로만 코어에 진입.
-- **상태는 전부 SQLite** — 전역 `state/openclaw.sqlite`, 에이전트별 `agents/<id>/agent/openclaw-agent.sqlite`. JSON 사이드카 안 씀.
+- **상태는 전부 SQLite** — 전역 `state/openclaw.sqlite`, 에이전트별 `agents/<id>/agent/openclaw-agent.sqlite`.
 
 *상태: 게이트웨이/에이전트가 요청 사이, 그리고 재시작 후에도 기억해야 하는 데이터 (휘발성 데이터 X)
 
@@ -47,7 +47,7 @@
 ⑤ 게이트웨이 ── durable delivery 정책으로 채널 어댑터에 전달 → 같은 채널로 역방향 응답
 ```
 
-핵심은 **단 하나의 장수 게이트웨이가 control plane이자 single source of truth(SSOT)** 라는 것.
+핵심은 **게이트웨이가 control plane이자 single source of truth(SSOT)** 라는 것.
 
 ---
 
@@ -59,7 +59,7 @@
 
 > *"builds runtime state, method registries, HTTP and WebSocket surfaces, config reload hooks, and graceful restart/shutdown."*
 
-즉 게이트웨이는 **① 앱·CLI·웹UI·노드·에이전트가 붙는 WS 서버**, **② 메서드 RPC 레지스트리(채널·세션·승인·노드…)**, **③ 이벤트 broadcast 허브**, **④ 인증·인가 경계**, **⑤ 채널 플러그인 매니저**, **⑥ 멀티 에이전트 라우터**를 한 몸에 가진다. 기본 바인드는 `127.0.0.1:18789`.
+게이트웨이는 **① 앱·CLI·웹UI·노드·에이전트가 붙는 WS 서버**, **② 메서드 RPC 레지스트리(채널·세션·승인·노드…)**, **③ 이벤트 broadcast 허브**, **④ 인증·인가 경계**, **⑤ 채널 플러그인 매니저**, **⑥ 멀티 에이전트 라우터**를 한 몸에 가진다. 기본 바인드는 `127.0.0.1:18789`.
 
 > **게이트웨이에 WS로 붙는 주체는 셋**:
 >

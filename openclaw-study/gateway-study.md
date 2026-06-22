@@ -1,18 +1,16 @@
-# OpenClaw Gateway 스터디 — 목표부터 게이트웨이 심층까지
+# OpenClaw 스터디 Gateway
 
 ---
 
-# 1. OpenClaw의 목표 — 무슨 문제를 푸는가
+# 1. OpenClaw의 목표
 
-**OpenClaw는 "내 기기에서 돌아가는, 항상 켜진 개인 AI 어시스턴트"다.** 패키지 설명 그대로 *"Multi-channel AI gateway with extensible messaging integrations."*
-
-풀려는 문제를 셋으로 쪼개면:
+**OpenClaw는 "내 기기에서 돌아가는, 항상 켜진 개인 AI 어시스턴트"다.**
 
 1. **클라우드에 갇히지 않기 (local-first)** — 어시스턴트가 남의 서버가 아니라 *내 로컬 기기*에서 돈다. 내 데이터·자격증명·세션이 내 기기에 남는다.
 2. **이미 쓰는 통로로 부르기 (multi-channel)** — 새 앱을 깔지 않고, Telegram·WhatsApp·Discord·Slack 등 **내가 이미 쓰는 메신저**로 어시스턴트를 호출하고 답을 받는다.
 3. **항상 켜져 있고 빠르게 답하기 (always-on)** — 요청마다 새로 뜨는 게 아니라, **장수(long-lived) 프로세스**가 상주하며 채널을 물고 세션·메모리를 유지한다.
 
-이 세 목표가 곧 게이트웨이의 존재 이유다. "local-first + multi-channel + always-on"을 동시에 만족하려면 **내 기기에 상주하면서 모든 채널과 에이전트를 묶는 중심 프로세스**가 필요한데, 그게 바로 게이트웨이다.
+"local-first + multi-channel + always-on"을 동시에 만족하려면 **내 기기에 상주하면서 모든 채널과 에이전트를 묶는 중심 프로세스**가 필요한데, 그게 바로 게이트웨이다.
 
 두 가지 관통 설계 원칙:
 - **코어는 플러그인을 모른다(plugin-agnostic)** — 채널/기능은 `src/plugin-sdk/*` 계약으로만 코어에 진입.
@@ -23,8 +21,6 @@
 ---
 
 # 2. 전체 구조 — 메시지가 흐르는 길
-
-**메시지가 흐르는 큰 길** (양방향):
 
 ```
 ① 외부 플랫폼(Telegram 등)
@@ -40,7 +36,7 @@
 ⑤ 게이트웨이 ── durable delivery 정책으로 채널 어댑터에 전달 → 같은 채널로 역방향 응답
 ```
 
-핵심은 **게이트웨이가 control plane이자 single source of truth(SSOT)** 라는 것.
+게이트웨이는 메시지의 전체 흐름에서 control plane이자 SSOT를 맡는다.
 
 ---
 
@@ -48,23 +44,20 @@
 
 ## 3.0 게이트웨이란 무엇인가 (역할)
 
-게이트웨이는 [`src/gateway/server.impl.ts`](https://github.com/openclaw/openclaw/blob/0fc5a57a34409782c8e0c9260cedbf788ed382d8/src/gateway/server.impl.ts)가 본체인 **상주 프로세스**다. 헤더 한 줄이 책임을 요약한다:
-
-> *"builds runtime state, method registries, HTTP and WebSocket surfaces, config reload hooks, and graceful restart/shutdown."*
+게이트웨이는 [`src/gateway/server.impl.ts`](https://github.com/openclaw/openclaw/blob/0fc5a57a34409782c8e0c9260cedbf788ed382d8/src/gateway/server.impl.ts)가 본체인 **상주 프로세스**다.
 
 게이트웨이는 **① 앱·CLI·웹UI·노드·에이전트가 붙는 WS 서버**, **② 메서드 RPC 레지스트리(채널·세션·승인·노드…)**, **③ 이벤트 broadcast 허브**, **④ 인증·인가 경계**, **⑤ 채널 플러그인 매니저**, **⑥ 멀티 에이전트 라우터**를 한 몸에 가진다.
 
-이 중 **②③④가 게이트웨이를 단순 메시지 중계가 아니라 "권한이 강제되는 control plane"으로 만드는 핵심 장치**다.
 
 ### ② 메서드 RPC 레지스트리
 
-앱·CLI·웹UI·에이전트가 `req {method, params}`로 호출할 수 있는 **모든 메서드를 이름→핸들러로 묶어둔 표**. 게이트웨이의 API 표면 전체다([`server-methods.ts`](https://github.com/openclaw/openclaw/blob/0fc5a57a34409782c8e0c9260cedbf788ed382d8/src/gateway/server-methods.ts)).
+앱·CLI·웹UI·에이전트가 요청(`req {method, params}`)으로 호출할 수 있는 **모든 메서드를 이름→핸들러로 묶어둔 표**다. [`server-methods.ts`](https://github.com/openclaw/openclaw/blob/0fc5a57a34409782c8e0c9260cedbf788ed382d8/src/gateway/server-methods.ts).
 
-핸들러는 **패밀리별 lazy 등록** — `coreGatewayHandlers`가 `createLazyCoreHandlers({methods, loadHandlers})`를 20여 번 펼쳐 만든다. 각 패밀리 모듈은 *그 메서드가 처음 호출될 때* 로드된다(startup이 가벼움, §always-on).
+핸들러는 각 메소드를 **패밀리별로 lazy하게 등록한다.** — `coreGatewayHandlers`가 `createLazyCoreHandlers({methods, loadHandlers})`를 20여 번 펼쳐 만든다. 각 패밀리 모듈은 *그 메서드가 처음 호출될 때* 로드된다(lazy).
 
 > **"패밀리(family)"란?** 관련 메서드들을 한 모듈로 묶은 그룹이다. 예컨대 `sessions.list`·`sessions.send`·`sessions.abort`…가 모두 `server-methods/sessions.ts` 한 파일에 들어있고, 이 묶음이 **"sessions 패밀리"**. 즉 *같은 모듈이 책임지는 메서드들의 집합*. `chat.*`·`cron.*`·`models.*`… 식으로 점(`.`) 앞 이름이 대체로 한 패밀리다.
 >
-> **"20여 번 펼쳐 만든다"란?** `createLazyCoreHandlers(...)`를 **패밀리 개수만큼(약 20번)** 호출하고, 각 호출이 돌려준 작은 맵 조각을 `...`(JS **스프레드**)로 `coreGatewayHandlers` **하나에 풀어 합친다**는 뜻. "펼친다 = 스프레드로 그 조각의 키들을 바깥 객체에 풀어 넣는다." 그래서 파일은 패밀리별로 나뉘어도, 런타임엔 **단일 레지스트리**가 된다.
+> **"20여 번 펼쳐 만든다"란?** `createLazyCoreHandlers(...)`를 **패밀리 개수만큼(약 20번)** 호출하고, 각 호출이 돌려준 작은 맵 조각을 `...`(JS **스프레드**)로 `coreGatewayHandlers` **하나에 풀어 합친다**는 뜻. 그래서 파일은 패밀리별로 나뉘어도, 런타임엔 **단일 레지스트리**가 된다.
 
 ```
 coreGatewayHandlers = {
@@ -99,7 +92,7 @@ req → authorizeGatewayMethod(④) → 쓰기 레이트리밋
 > **role과 다름**: `role`(operator/node)은 큰 분류, `scope`는 그 안의 세부 권한. 예) operator 역할이라도 `read`만 있으면 메시지 전송(`write` 필요)은 거부. (앞 §②·§③에서 본 `operator.read`/`READ`/`APPROVALS` 가 다 이 스코프다.)
 
 > **예시 — 플러그인이 민감 메서드를 약하게 못 연다**
-> 각 메서드는 "필요 스코프"(= 호출에 필요한 권한 라벨, 정의는 §3.0 ④)를 선언한다. 그런데 `config.*`·`exec.approvals.*`·`wizard.*`·`update.*` 는 **예약된 admin 네임스페이스**. 플러그인이 이 이름으로 메서드를 등록하면, **선언한 스코프를 무시하고 메서드 *이름*만 보고 필요 스코프를 `operator.admin`으로 강제**한다([`gateway-method-policy.ts`](https://github.com/openclaw/openclaw/blob/0fc5a57a34409782c8e0c9260cedbf788ed382d8/src/shared/gateway-method-policy.ts)).
+> 각 메서드는 "필요 스코프"(= 호출에 필요한 권한 라벨)를 선언한다. 그런데 `config.*`·`exec.approvals.*`·`wizard.*`·`update.*` 는 **예약된 admin 네임스페이스**. 플러그인이 이 이름으로 메서드를 등록하면, **선언한 스코프를 무시하고 메서드 *이름*만 보고 필요 스코프를 `operator.admin`으로 강제**한다([`gateway-method-policy.ts`](https://github.com/openclaw/openclaw/blob/0fc5a57a34409782c8e0c9260cedbf788ed382d8/src/shared/gateway-method-policy.ts)).
 >
 > ```
 > 플러그인 시도:  config.setSecret   scope:"operator.read"   ← 약하게(아무나) 열려는 시도
@@ -110,13 +103,15 @@ req → authorizeGatewayMethod(④) → 쓰기 레이트리밋
 > authorizeGatewayMethod → "missing scope" 거부
 > ```
 >
-> 즉 "약한지 비교"하는 게 아니라 **이름으로 스코프를 정하고 플러그인 선언을 덮어쓴다.** 플러그인이 `config.*` 밖 이름(`myplugin.foo`)을 쓰면 그건 admin 네임스페이스가 아니라 사칭도 불가. → 플러그인(준-신뢰 코드)이 민감 표면을 저권한으로 여는 escalation 구멍을 못 만든다.
+> **이름으로 스코프를 정하고 플러그인 선언을 덮어쓴다.** → 플러그인(준-신뢰 코드)이 민감 표면을 저권한으로 여는 escalation 구멍을 못 만든다.
 
 ### ③ 이벤트 broadcast 허브
 
-`res`(요청 응답)와 **별개로**, 상태 변화를 구독한 앱·UI·노드(세션을 들여다보는 쪽)에게 `event` 프레임으로 밀어내는 장치([`server-broadcast.ts`](https://github.com/openclaw/openclaw/blob/0fc5a57a34409782c8e0c9260cedbf788ed382d8/src/gateway/server-broadcast.ts)).
+`res`(요청 응답)와 **별개로**, 상태 변화를 구독한 앱·UI·노드(세션을 들여다보는 쪽)에게 `event` 프레임으로 밀어내는 장치의 역할을 수행한다.([`server-broadcast.ts`](https://github.com/openclaw/openclaw/blob/0fc5a57a34409782c8e0c9260cedbf788ed382d8/src/gateway/server-broadcast.ts)).
+- `broadcast(event, payload)`(연결된 모두에게)
+- `broadcastToConnIds(...다)`(특정 연결에게만)
 
-두 함수가 `broadcast(event, payload)`(연결된 모두에게) / `broadcastToConnIds(...다)`(특정 연결에게만). 연결마다 돌며 셋을 적용:
+위의 두 함수가 연결마다 돌며 다음을 적용한다.
 
 - **(a) 이벤트별 scope 가드** — `EVENT_SCOPE_GUARDS`가 이벤트마다 필요 스코프 선언 → **권한 없는 연결엔 안 보냄**.
   ```
@@ -132,7 +127,7 @@ req → authorizeGatewayMethod(④) → 쓰기 레이트리밋
 
 모든 연결의 신원을 확인(인증)하고 모든 메서드 호출의 권한을 검사(인가)하는 단일 관문.
 
-- **인증** — `connect` 핸드셰이크에서 자격증명+device 서명 검증 → **granted role+scopes를 연결에 고정**. 이 값은 "상태"의 `device_auth_tokens`·`device_pairing_paired`에서 조회된다. → 권한이 **연결당 1회** 확정되고, 이후 요청은 이 값을 못 부풀린다.
+- **인증** — `connect` 핸드셰이크에서 자격증명+device 서명 검증 → **granted role+scopes를 연결에 고정**한다. 이 값은 "상태"의 `device_auth_tokens`·`device_pairing_paired`에서 조회된다. → 권한이 **연결당 1회** 확정되고, 이후 요청은 이 값을 못 부풀린다.
 - **인가** — 매 req마다 디스패치 직전 `authorizeGatewayMethod`가 검사([`server-methods.ts:221`](https://github.com/openclaw/openclaw/blob/0fc5a57a34409782c8e0c9260cedbf788ed382d8/src/gateway/server-methods.ts#L221)):
   ```
   role = parseGatewayRole(connect.role ?? "operator")  → 실패 "unauthorized role"

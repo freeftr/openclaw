@@ -13,7 +13,7 @@
                                  │              │
                      채널+플러그인 ✅      에이전트 런타임 ✅ ── 심화 ✅
                      (시스템+구현 2편)          │
-                                        ★ agent-core 루프 🔄 ★
+                                        ★ agent-core 루프 ✅ ★
                                                 │
                               메모리 ✅ ── 컨텍스트 엔진·압축 (부분)
 ```
@@ -30,14 +30,9 @@
 | 6 | [agent-deep-analysis.md](./agent-deep-analysis.md) | agent 심화 — 동시성 lane·steering·승인·cooldown·transport·CLI백엔드·서브에이전트 | **분석**(설계 평가) |
 | 7 | [channels-plugins-study.md](./channels-plugins-study.md) | 채널+플러그인 시스템 — 런타임·in/outbound·SDK계약·로더·경계 | 학습+분석 |
 | 8 | [channel-plugins-deep.md](./channel-plugins-deep.md) | 채널 구현 심층 — TG/Discord/WA/Slack·Signal 내부, 스펙트럼 19종, doctor·미디어 | 분석 |
+| 9 | [agent-core-study.md](./agent-core-study.md) | 내장 에이전트 루프 심장부 — runLoop 이중 while·prompt() API·세션 JSONL DAG·시스템 프롬프트·툴 생애·이벤트 투영·compaction 계약 | 학습+분석 |
 
 다이어그램: [diagrams/](./diagrams) — 01 아키텍처 · 02 에이전트 루프 · 03 플러그인 생명주기 · 04 게이트웨이 RPC · 05 end-to-end · 06 agent run 2중 루프
-
-## 진행 중 🔄
-
-| 주제 | 범위 | 상태 |
-|---|---|---|
-| **agent-core 루프 (내장 기본 에이전트)** | `packages/agent-core` — runLoop 본체·prompt() API·세션 JSONL DAG·시스템 프롬프트 조립·툴 생애·이벤트 스트림·compaction 계약. "안쪽 turn 루프는 attempt.ts에 없다"는 gotcha를 여는 심장부 편 | ultracode 진행 중 → `agent-core-study.md` |
 
 ## 남은 주제 (추천 순)
 

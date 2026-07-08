@@ -31,6 +31,7 @@
 | 7 | [channels-plugins-study.md](./channels-plugins-study.md) | 채널+플러그인 시스템 — 런타임·in/outbound·SDK계약·로더·경계 | 학습+분석 |
 | 8 | [channel-plugins-deep.md](./channel-plugins-deep.md) | 채널 구현 심층 — TG/Discord/WA/Slack·Signal 내부, 스펙트럼 19종, doctor·미디어 | 분석 |
 | 9 | [agent-core-study.md](./agent-core-study.md) | 내장 에이전트 루프 심장부 — runLoop 이중 while·prompt() API·세션 JSONL DAG·시스템 프롬프트·툴 생애·이벤트 투영·compaction 계약 | 학습+분석 |
+| 10 | [main-agent-study.md](./main-agent-study.md) | main 에이전트의 하루 — 부트스트랩 8종·SOUL/IDENTITY·BOOT.md·auto-reply·heartbeat·메모리 유지보수·메인 세션 수명 | 학습+분석 |
 
 다이어그램: [diagrams/](./diagrams) — 01 아키텍처 · 02 에이전트 루프 · 03 플러그인 생명주기 · 04 게이트웨이 RPC · 05 end-to-end · 06 agent run 2중 루프
 

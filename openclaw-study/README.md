@@ -15,7 +15,7 @@
                      (시스템+구현 2편)          │
                                         ★ agent-core 루프 ✅ ★
                                                 │
-                              메모리 ✅ ── 컨텍스트 엔진·압축 (부분)
+                              메모리 ✅ ── 컨텍스트 엔진·compaction ✅
 ```
 
 ## 완료한 문서
@@ -32,7 +32,8 @@
 | 8 | [channel-plugins-deep.md](./channel-plugins-deep.md) | 채널 구현 심층 — TG/Discord/WA/Slack·Signal 내부, 스펙트럼 19종, doctor·미디어 | 분석 |
 | 9 | [agent-core-study.md](./agent-core-study.md) | 내장 에이전트 루프 심장부 — runLoop 이중 while·prompt() API·세션 JSONL DAG·시스템 프롬프트·툴 생애·이벤트 투영·compaction 계약 | 학습+분석 |
 | 10 | [main-agent-study.md](./main-agent-study.md) | main 에이전트의 하루 — 부트스트랩 8종·SOUL/IDENTITY·BOOT.md·auto-reply·heartbeat·메모리 유지보수·메인 세션 수명 | 학습+분석 |
-| 11 | [nodes-study.md](./nodes-study.md) | 노드 시스템 — node-host·2겹 페어링·invoke 카탈로그·기기 능력·exec 포워딩·게이트웨이측·네이티브 앱 | 학습+분석 |
+| 11 | [nodes-study.md](./nodes-study.md) | 노드 시스템 — node-host·2겹 페어링·invoke 카탈로그·기기 능력·exec 포워딩·게이트웨이측·네이티브 앱 (+부록 B 외부 교차검증) | 학습+분석 |
+| 12 | [context-engine-study.md](./context-engine-study.md) | 컨텍스트/세션 엔진 심화 — **compaction=삭제 아닌 DAG 재배선**·세션 DAG(parentId+leaf)·JSONL 저장·branch 요약·조립(마커 접기)·재개/fork 계보 | 학습+분석 |
 
 다이어그램: [diagrams/](./diagrams) — 01 아키텍처 · 02 에이전트 루프 · 03 플러그인 생명주기 · 04 게이트웨이 RPC · 05 end-to-end · 06 agent run 2중 루프 · 07 노드 설계⇄정설 교차검증
 
@@ -41,8 +42,7 @@
 | 순위 | 주제 | 범위 | 왜 |
 |---|---|---|---|
 | 1 | **운영 축: CLI·온보딩·config·doctor·state** | `src/cli`·`commands`·`wizard`·`config`·`state` | "깔면 어떻게 뜨고 설정되나". doctor 마이그레이션(canonical config + `doctor --fix`)이 이 레포의 가장 독특한 설계 철학 — 루트 AGENTS.md 절반의 실체 |
-| 2 | **세션·컨텍스트 엔진 심화** | `src/context-engine`·`sessions`·compaction·transcript DAG | 메모리 스터디의 옆 조각. "compaction=DAG 마커" 등 비직관 다수 (agent-core 편과 일부 겹침 — 그 결과 보고 범위 조정) |
-| 4 | **보안 축** | `secrets`·`security`·exec approvals·sandbox·credentials | 위협 모델이 명시적인 코드(승인 2-RPC·5분 TTL handoff·CWE-841 차단). 보안 관점 훈련 |
+| 2 | **보안 축** | `secrets`·`security`·exec approvals·sandbox·credentials | 위협 모델이 명시적인 코드(승인 2-RPC·5분 TTL handoff·CWE-841 차단). 보안 관점 훈련 |
 | 5 | **cron·tasks·flows·heartbeat** | `src/cron`·`tasks`·`flows` | "에이전트가 스스로 깨어나는" 축. lane 스케줄링(6번 문서)과 연결 |
 | 6 | **모델 카탈로그·프로바이더 런타임** | `model-catalog`·`provider-runtime`·auth-profiles | 수십 provider의 단일 카탈로그 정규화. cooldown/OAuth(6번 문서)의 상류 |
 | 7 | **미디어·음성 스택** | `talk`·`tts`·`realtime-transcription`·`*-generation`·`media-understanding` | 멀티모달 파이프라인. Discord realtime voice 같은 독립 서브시스템 |

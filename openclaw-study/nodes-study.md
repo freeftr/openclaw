@@ -1,9 +1,5 @@
 # OpenClaw 노드 시스템 — 게이트웨이에 손발을 빌려주는 기기들
 
-> ultracode 멀티에이전트(서브에이전트 Opus 4.8 × 9)로 7영역 병렬 매핑 → 정확성 비평 → 종합.
-> 코드 `file:line`은 **`openclaw/openclaw@0fc5a57a`** 기준 (study 커밋들은 `src`/`packages`/`apps`/`extensions`를 변경하지 않아 working tree == 이 SHA로 검증됨).
-> 선행 전제: [게이트웨이](./gateway-study.md)(WS·인가·registry 기초)와 [에이전트](./agent-runtime-study.md)(nodes-tool·exec 분기)는 안다고 가정.
-
 ---
 
 ## 0. 노드란 무엇인가 — 재정의
@@ -140,6 +136,32 @@
 
 ---
 
-### 부록. 검증 메모
+### 부록 A. 검증 메모
 - 핀 유효성: `0fc5a57a..HEAD`는 study 문서만 변경 → `src`/`packages`/`apps`/`extensions` byte-동일(메인 세션 검증).
 - 비평 정정 반영: cmd.exe 차단은 **allowlist 모드 한정** / `talk.ptt.*`는 코어 정적 상수(플러그인 경유 아님, canvas만 경유) / `nodePresenceTimers` **미사용 확정** / `scopes:[]` 선언↔자동승인 조건 연결 / 실패 invoke 승인창 즉시 회수 / nodeId+connId 이중검증·이중 타임아웃 교차 확인.
+
+---
+
+## 부록 B. 외부 교차검증 — "이 설계가 정설과 맞나" (deep-research)
+
+앞의 §1~8은 **코드 근거**다. 여기서는 노드 시스템의 핵심 설계 선택 5가지를 **확립된 RFC·NIST·object-capability 문헌**과 대조해 "특이한 발명인가, 통념의 조합인가"를 판정한다. 방법: 5각도 웹 검색 → 24개 소스 fetch → 92개 주장 추출 → 주장당 3표 적대적 검증(2/3 반증 시 폐기) → 종합(25개 검증, 24 confirm / 1 kill).
+
+**한 줄 결론:** 5개 중 4개가 **1차 표준으로 직접 뒷받침**되고, 5번째(push-to-wake)는 알려진 신뢰성 한계까지 포함해 모바일 통념과 일치. 노드 설계는 **특이한 선택이 아니라 정설의 조합** — 진짜 엔지니어링 판단은 "out-of-band 페어링 + capability 교집합 + hop별 재평가 + 요청-id 결속 창"을 **하나의 로컬-퍼스트 멀티기기 에이전트 패브릭으로 합성**한 데 있다.
+
+| # | 노드 설계(코드) | 대응 정설 | 판정 | 1차 출처 |
+|---|---|---|---|---|
+| 1 | pending→운영자 out-of-band 승인→paired + TTL, **노드는 자기 페어링 승인 불가** (§2) | OAuth 2.0 Device Authorization Grant: 요청 기기≠승인 주체, pending 폴링 상태기계, `expires_in`+`expired_token` | **CONFIRM** (3-0) | [RFC 8628](https://www.rfc-editor.org/rfc/rfc8628) |
+| 2 | 노드 자기선언 능력 불신, **`declared ∩ approved`만 유효**, 재연결 시 확장 차단 (§2) | object-capability: 권한=위조불가 참조의 소유, "no designation without authority" / **attenuation**(승인 부분집합으로 좁힘) / POLA / zero-trust "네트워크 위치·소유로 암묵 신뢰 금지" | **CONFIRM** (3-0) | [NIST SP 800-207](https://nvlpubs.nist.gov/nistpubs/specialpublications/NIST.SP.800-207.pdf), [Capability Myths Demolished](http://zesty.ca/capmyths/new.html) |
+| 3 | remote exec을 **caller·게이트웨이·노드 3자 독립 재평가**, 상위 승인 플래그 불신 (§5) | zero-trust "요청마다 동적 재평가", "한 리소스 인가가 다른 리소스로 자동 확장 안 됨" / **confused deputy** 회피(권한이 designation과 함께 이동) | **CONFIRM** (3-0) | [NIST SP 800-207](https://nvlpubs.nist.gov/nistpubs/specialpublications/NIST.SP.800-207.pdf), [Capability Myths Demolished](http://zesty.ca/capmyths/new.html) |
+| 4 | exec 승인을 **runId에 바인딩한 단명 승인창**, 창 밖 완료-알림 주입 거부, 창 수명=요청 수명 (§6) | OAuth Security BCP: 바인딩은 **transaction-specific**, nonce는 일회용·발신 세션에 결속 → 주입값 불일치로 실패(replay·injection 방어) | **CONFIRM** (3-0) | [RFC 9700 (BCP 240)](https://datatracker.ietf.org/doc/html/rfc9700) |
+| 5 | 오프라인 노드에 **APNs/FCM push-to-wake** 후 연결되면 invoke (§3 거절 경로) | FCM 고우선순위가 "잠든 기기 깨움" — 단 **전달 보장 아님**(inactive ~15% drop, Doze 지연은 사실상 무한) | **CONFIRM** (신뢰성 한계 포함, 3-0) | [FCM priority](https://firebase.google.com/docs/cloud-messaging/android-message-priority), [FCM delivery rates](https://firebase.blog/posts/2024/07/understand-fcm-delivery-rates/) |
+
+**정직한 한계(연구가 스스로 밝힌 caveat):**
+- **표준↔구현 매핑은 유비(analogy)이지 코드 검증이 아니다.** deep-research는 레포를 읽지 않았다 — "설계가 정설과 정렬됨"만 입증하며, "코드가 그 정설을 올바로 구현함"은 §1~8(코드 근거)이 담당. 두 축이 서로를 보완.
+- #1: RFC 8628의 승인자는 "end user"라 OpenClaw의 **operator 전용**은 표준의 요청자≠승인자 원칙을 **더 좁게 특화**한 것.
+- #2: 순수 ocap은 **탈중앙**(소유=권한, 중앙 재검증 없음)이라, 게이트웨이-교집합은 ocap의 **충실한 응용**이지 문자 그대로의 ocap 메커니즘은 아님.
+- #4: RFC 9700의 바인딩은 암호학적 소유증명(PKCE)/세션 결속이라 OpenClaw의 **runId 상관창보다 강함** — 원리의 평행선이지 "PKCE를 쓴다"는 주장이 아님.
+- #5: 출처는 **FCM(Android) 위주**, APNs 쪽은 유비로 일반화(이번 회차 Apple 문서 독립 검증 안 함).
+- 적대적 검증에서 **1건 폐기**: "capability의 ACL 대비 정의적 성질 = ambient authority 제거/명시적 권한 선택"은 1-2로 반증(ocap 이론 내 논쟁적 뉘앙스) → "ambient authority" 구분은 정설로 과신하지 말 것.
+
+**남은 질문(코드로만 답 가능):** (a) 재등록 경로로 능력 재확장이 새는가? (b) #4 창 TTL은 hub·노드 어디서 강제되나? (c) 3자 불일치 시 fail-closed가 모든 경로에서 보장되나(§8 auto-review 틈과 연결)? — §5·§6·§8이 코드로 부분 답을 주지만, 완전 폐로 증명은 별도 보안 축 스터디로.

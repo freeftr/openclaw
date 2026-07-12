@@ -34,7 +34,7 @@
 | 10 | [main-agent-study.md](./main-agent-study.md) | main 에이전트의 하루 — 부트스트랩 8종·SOUL/IDENTITY·BOOT.md·auto-reply·heartbeat·메모리 유지보수·메인 세션 수명 | 학습+분석 |
 | 11 | [nodes-study.md](./nodes-study.md) | 노드 시스템 — node-host·2겹 페어링·invoke 카탈로그·기기 능력·exec 포워딩·게이트웨이측·네이티브 앱 | 학습+분석 |
 
-다이어그램: [diagrams/](./diagrams) — 01 아키텍처 · 02 에이전트 루프 · 03 플러그인 생명주기 · 04 게이트웨이 RPC · 05 end-to-end · 06 agent run 2중 루프
+다이어그램: [diagrams/](./diagrams) — 01 아키텍처 · 02 에이전트 루프 · 03 플러그인 생명주기 · 04 게이트웨이 RPC · 05 end-to-end · 06 agent run 2중 루프 · 07 노드 설계⇄정설 교차검증
 
 ## 남은 주제 (추천 순)
 
